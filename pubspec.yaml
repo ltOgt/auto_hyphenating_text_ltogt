@@ -4,11 +4,11 @@ version: 0.1.1
 homepage: https://github.com/impure/auto_hyphenating_text
 
 screenshots:
-  - description: 'The autohyphenating text widget'
+  - description: "The autohyphenating text widget"
     path: images/demo.webp
 
 environment:
-  sdk: '>=2.18.5 <4.0.0'
+  sdk: ">=3.0.0 <4.0.0"
   flutter: ">=1.17.0"
 
 dependencies:

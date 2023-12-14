@@ -11,30 +11,31 @@ Future<void> initHyphenation([DefaultResourceLoaderLanguage language = DefaultRe
   globalLoader = await DefaultResourceLoader.load(language);
 }
 
+typedef StyledText = ({String text, TextStyle style});
+
 /// A replacement for the default text object which supports hyphenation.
 class AutoHyphenatingText extends StatelessWidget {
   const AutoHyphenatingText(
-      this.text, {
-        this.shouldHyphenate,
-        this.loader,
-        this.style,
-        this.strutStyle,
-        this.textAlign,
-        this.textDirection,
-        this.locale,
-        this.softWrap,
-        this.overflow,
-        this.textScaleFactor,
-        this.maxLines,
-        this.semanticsLabel,
-        this.textWidthBasis,
-        this.selectionColor,
-        this.hyphenationCharacter = '‐',
-        this.selectable = false,
-        super.key,
-      });
+    this.textFragments, {
+    this.shouldHyphenate,
+    this.loader,
+    this.strutStyle,
+    this.textAlign,
+    this.textDirection,
+    this.locale,
+    this.softWrap,
+    this.overflow,
+    this.textScaleFactor,
+    this.maxLines,
+    this.semanticsLabel,
+    this.textWidthBasis,
+    this.selectionColor,
+    this.hyphenationCharacter = '‐',
+    this.selectable = false,
+    super.key,
+  });
 
-  final String text;
+  final List<StyledText> textFragments; // TODO removed effective text style stuff, need to be explicit
 
   /// An object that allows for computing acceptable hyphenation locations.
   final ResourceLoader? loader;
@@ -44,7 +45,6 @@ class AutoHyphenatingText extends StatelessWidget {
 
   final String hyphenationCharacter;
 
-  final TextStyle? style;
   final TextAlign? textAlign;
   final StrutStyle? strutStyle;
   final TextDirection? textDirection;
@@ -101,7 +101,9 @@ class AutoHyphenatingText extends StatelessWidget {
     }
 
     int? getLastSyllableIndex(List<String> syllables, double availableSpace, TextStyle? effectiveTextStyle, int lines) {
-      if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle, textDirection, textScaleFactor) > availableSpace) {
+      if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle,
+              textDirection, textScaleFactor) >
+          availableSpace) {
         return null;
       }
 
@@ -111,7 +113,9 @@ class AutoHyphenatingText extends StatelessWidget {
       while (lowerBound != upperBound - 1) {
         int testIndex = ((lowerBound + upperBound) * 0.5).floor();
 
-        if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)), effectiveTextStyle, textDirection, textScaleFactor) > availableSpace) {
+        if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)),
+                effectiveTextStyle, textDirection, textScaleFactor) >
+            availableSpace) {
           upperBound = testIndex;
         } else {
           lowerBound = testIndex;
@@ -121,18 +125,30 @@ class AutoHyphenatingText extends StatelessWidget {
       return lowerBound;
     }
 
-    final DefaultTextStyle defaultTextStyle = DefaultTextStyle.of(context);
-    TextStyle? effectiveTextStyle = style;
-    if (style == null || style!.inherit) {
-      effectiveTextStyle = defaultTextStyle.style.merge(style);
-    }
-    if (MediaQuery.boldTextOf(context)) {
-      effectiveTextStyle = effectiveTextStyle!.merge(const TextStyle(fontWeight: FontWeight.bold));
-    }
-
     return LayoutBuilder(builder: (BuildContext context, BoxConstraints constraints) {
-      List<String> words = text.split(" ");
-      List<InlineSpan> texts = <InlineSpan>[];
+      List<List<String>> fragmentWords = textFragments.map((e) => e.text.split(" ")).toList();
+      List<int> fragmentEnds = [];
+      for (final list in fragmentWords) {
+        fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
+      }
+      List<TextStyle> fragmentStyles = textFragments.map((e) => e.style).toList();
+      int currentFragmentIndex = 0; // count up when reached this framentEnd
+
+      int currentEnd = fragmentEnds.first;
+      TextStyle currentStyle = fragmentStyles.first; // TODO check empty
+      void updateOnNextFragment(int i) {
+        if (i > currentEnd) {
+          currentFragmentIndex += 1;
+          currentStyle = fragmentStyles[currentFragmentIndex];
+          currentEnd = fragmentEnds[currentFragmentIndex];
+        }
+      }
+
+      List<String> wordsMerged = [
+        for (final list in fragmentWords) //
+          ...list,
+      ];
+      List<TextSpan> texts = <TextSpan>[];
 
       assert(globalLoader != null, "AutoHyphenatingText not initialized! Remember to call initHyphenation().");
       final Hyphenator hyphenator = Hyphenator(
@@ -140,40 +156,59 @@ class AutoHyphenatingText extends StatelessWidget {
         hyphenateSymbol: '_',
       );
 
-      double singleSpaceWidth = getTextWidth(" ", effectiveTextStyle, textDirection, textScaleFactor);
+      double singleSpaceWidth = getTextWidth(" ", currentStyle, textDirection, textScaleFactor);
       double currentLineSpaceUsed = 0;
       int lines = 0;
 
-      double endBuffer = style?.overflow == TextOverflow.ellipsis ? getTextWidth("…", style, textDirection, textScaleFactor) : 0;
+      double endBuffer = currentStyle.overflow == TextOverflow.ellipsis
+          ? getTextWidth("…", currentStyle, textDirection, textScaleFactor)
+          : 0;
 
-      for (int i = 0; i < words.length; i++) {
-        double wordWidth = getTextWidth(words[i], effectiveTextStyle, textDirection, textScaleFactor);
+      final wordCount = wordsMerged.length;
+      final lastWordIndex = wordCount - 1;
+      for (int i = 0; i < wordCount; i++) {
+        double wordWidth = getTextWidth(wordsMerged[i], currentStyle, textDirection, textScaleFactor);
 
         if (currentLineSpaceUsed + wordWidth < constraints.maxWidth - endBuffer) {
-          texts.add(TextSpan(text: words[i]));
+          texts.add(
+            TextSpan(
+              text: wordsMerged[i],
+              style: currentStyle,
+            ),
+          );
           currentLineSpaceUsed += wordWidth;
         } else {
-          final List<String> syllables = words[i].length == 1
-              ? <String>[words[i]]
-              : hyphenator.hyphenateWordToList(words[i]);
-          final int? syllableToUse = words[i].length == 1
+          final List<String> syllables =
+              wordsMerged[i].length == 1 ? <String>[wordsMerged[i]] : hyphenator.hyphenateWordToList(wordsMerged[i]);
+          final int? syllableToUse = wordsMerged[i].length == 1
               ? null
-              : getLastSyllableIndex(syllables, constraints.maxWidth - currentLineSpaceUsed, effectiveTextStyle, lines);
+              : getLastSyllableIndex(syllables, constraints.maxWidth - currentLineSpaceUsed, currentStyle, lines);
 
-          if (syllableToUse == null || (shouldHyphenate != null && !shouldHyphenate!(constraints.maxWidth, currentLineSpaceUsed, wordWidth))) {
+          if (syllableToUse == null ||
+              (shouldHyphenate != null && !shouldHyphenate!(constraints.maxWidth, currentLineSpaceUsed, wordWidth))) {
             if (currentLineSpaceUsed == 0) {
-              texts.add(TextSpan(text: words[i]));
+              texts.add(
+                TextSpan(
+                  text: wordsMerged[i],
+                  style: currentStyle,
+                ),
+              );
               currentLineSpaceUsed += wordWidth;
             } else {
               i--;
-              if (texts.last == const TextSpan(text: " ")) {
+              if (texts.last.text == " ") {
                 texts.removeLast();
               }
               currentLineSpaceUsed = 0;
               lines++;
               if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
                 if (overflow == TextOverflow.ellipsis) {
-                  texts.add(const TextSpan(text: "…"));
+                  texts.add(
+                    TextSpan(
+                      text: "…",
+                      style: currentStyle,
+                    ),
+                  );
                 }
                 break;
               }
@@ -181,13 +216,27 @@ class AutoHyphenatingText extends StatelessWidget {
             }
             continue;
           } else {
-            texts.add(TextSpan(text: mergeSyllablesFront(syllables, syllableToUse, allowHyphen: allowHyphenation(lines))));
-            words.insert(i + 1, mergeSyllablesBack(syllables, syllableToUse));
+            texts.add(
+              TextSpan(
+                text: mergeSyllablesFront(
+                  syllables,
+                  syllableToUse,
+                  allowHyphen: allowHyphenation(lines),
+                ),
+                style: currentStyle,
+              ),
+            );
+            wordsMerged.insert(i + 1, mergeSyllablesBack(syllables, syllableToUse));
             currentLineSpaceUsed = 0;
             lines++;
             if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
               if (overflow == TextOverflow.ellipsis) {
-                texts.add(const TextSpan(text: "…"));
+                texts.add(
+                  TextSpan(
+                    text: "…",
+                    style: currentStyle,
+                  ),
+                );
               }
               break;
             }
@@ -196,19 +245,31 @@ class AutoHyphenatingText extends StatelessWidget {
           }
         }
 
-        if (i != words.length - 1) {
+        if (i != lastWordIndex) {
+          updateOnNextFragment(i);
+
           if (currentLineSpaceUsed + singleSpaceWidth < constraints.maxWidth) {
-            texts.add(const TextSpan(text: " "));
+            texts.add(
+              TextSpan(
+                text: " ",
+                style: currentStyle,
+              ),
+            );
             currentLineSpaceUsed += singleSpaceWidth;
           } else {
-            if (texts.last == const TextSpan(text: " ")) {
+            if (texts.last.text == " ") {
               texts.removeLast();
             }
             currentLineSpaceUsed = 0;
             lines++;
             if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
               if (overflow == TextOverflow.ellipsis) {
-                texts.add(const TextSpan(text: "…"));
+                texts.add(
+                  TextSpan(
+                    text: "…",
+                    style: currentStyle,
+                  ),
+                );
               }
               break;
             }
@@ -225,11 +286,9 @@ class AutoHyphenatingText extends StatelessWidget {
           TextSpan(locale: locale, children: texts),
           textDirection: textDirection,
           strutStyle: strutStyle,
-          textScaleFactor:
-          textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
+          textScaleFactor: textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
           textWidthBasis: textWidthBasis ?? TextWidthBasis.parent,
           textAlign: textAlign ?? TextAlign.start,
-          style: style,
           maxLines: maxLines,
         );
       } else {
@@ -239,14 +298,12 @@ class AutoHyphenatingText extends StatelessWidget {
           locale: locale,
           softWrap: softWrap ?? true,
           overflow: overflow ?? TextOverflow.clip,
-          textScaleFactor:
-          textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
+          textScaleFactor: textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
           textWidthBasis: textWidthBasis ?? TextWidthBasis.parent,
           selectionColor: selectionColor,
           textAlign: textAlign ?? TextAlign.start,
           selectionRegistrar: registrar,
           text: TextSpan(
-            style: effectiveTextStyle,
             children: texts,
           ),
         );
@@ -259,7 +316,7 @@ class AutoHyphenatingText extends StatelessWidget {
       }
       return Semantics(
         textDirection: textDirection,
-        label: semanticsLabel ?? text,
+        label: semanticsLabel,
         child: ExcludeSemantics(
           child: richText,
         ),
