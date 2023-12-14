@@ -48,21 +48,31 @@ class _GermanExampleState extends State<GermanExample> {
         future: initOperation,
         builder: (_, AsyncSnapshot<void> snapshot) {
           if (snapshot.connectionState == ConnectionState.done) {
-            return const Center(
-              child: AutoHyphenatingText([
-                (
-                  text: 'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
-                  style: TextStyle(color: Colors.black),
-                ),
-                (
-                  text: ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
-                  style: TextStyle(color: Colors.blue),
-                ),
-                (
-                  text: ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
-                  style: TextStyle(color: Colors.black),
-                ),
-              ]),
+            return Center(
+              child: AutoHyphenatingText(
+                [
+                  (
+                    text:
+                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    style: const TextStyle(color: Colors.black),
+                    onTap: null,
+                  ),
+                  (
+                    text:
+                        ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    style: const TextStyle(color: Colors.blue),
+                    onTap: () {
+                      print("Moin");
+                    },
+                  ),
+                  (
+                    text:
+                        ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    style: const TextStyle(color: Colors.black),
+                    onTap: null,
+                  ),
+                ],
+              ),
             );
           } else {
             return const Center(

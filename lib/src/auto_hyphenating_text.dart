@@ -1,5 +1,7 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:hyphenator_impure/hyphenator.dart';
 
 /// This object is used to tell us acceptable hyphenation positions
@@ -11,10 +13,10 @@ Future<void> initHyphenation([DefaultResourceLoaderLanguage language = DefaultRe
   globalLoader = await DefaultResourceLoader.load(language);
 }
 
-typedef StyledText = ({String text, TextStyle style});
+typedef TextFragment = ({String text, TextStyle style, VoidCallback? onTap});
 
 /// A replacement for the default text object which supports hyphenation.
-class AutoHyphenatingText extends StatelessWidget {
+class AutoHyphenatingText extends StatefulWidget {
   const AutoHyphenatingText(
     this.textFragments, {
     this.shouldHyphenate,
@@ -35,7 +37,7 @@ class AutoHyphenatingText extends StatelessWidget {
     super.key,
   });
 
-  final List<StyledText> textFragments; // TODO removed effective text style stuff, need to be explicit
+  final List<TextFragment> textFragments; // TODO removed effective text style stuff, need to be explicit
 
   /// An object that allows for computing acceptable hyphenation locations.
   final ResourceLoader? loader;
@@ -58,141 +60,131 @@ class AutoHyphenatingText extends StatelessWidget {
   final Color? selectionColor;
   final bool selectable;
 
-  String mergeSyllablesFront(List<String> syllables, int indicesToMergeInclusive, {required bool allowHyphen}) {
-    StringBuffer buffer = StringBuffer();
+  @override
+  State<AutoHyphenatingText> createState() => _AutoHyphenatingTextState();
+}
 
-    for (int i = 0; i <= indicesToMergeInclusive; i++) {
-      buffer.write(syllables[i]);
+class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
+  late List<List<String>> fragmentWords;
+  late List<int> fragmentEnds;
+  late List<TextStyle> fragmentStyles;
+  late List<String> wordsMerged;
+  late Map<int, GestureRecognizer> wordRecognizers;
+  late int wordCount;
+  late int lastWordIndex;
+  void initFragments() {
+    fragmentWords = widget.textFragments.map((e) => e.text.split(" ")).toList();
+    fragmentEnds = [];
+    for (final list in fragmentWords) {
+      fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
     }
+    fragmentStyles = widget.textFragments.map((e) => e.style).toList();
+    wordsMerged = [
+      for (final list in fragmentWords) //
+        ...list,
+    ];
+    wordCount = wordsMerged.length;
+    lastWordIndex = wordCount - 1;
 
-    // Only write the hyphen if the character is not punctuation
-    String returnString = buffer.toString();
-    if (allowHyphen && !RegExp("\\p{P}", unicode: true).hasMatch(returnString[returnString.length - 1])) {
-      return "$returnString$hyphenationCharacter";
+    wordRecognizers = {};
+    for (int i = 0; i < widget.textFragments.length; i++) {
+      final callback = widget.textFragments[i].onTap;
+      if (callback == null) continue;
+
+      final start = (i == 0) ? 0 : fragmentEnds[i - 1];
+      final count = fragmentWords[i].length;
+      for (int i = start; i < start + count; i++) {
+        wordRecognizers[i] = TapGestureRecognizer()..onTap = callback;
+      }
     }
-
-    return returnString;
   }
 
-  String mergeSyllablesBack(List<String> syllables, int indicesToMergeInclusive) {
-    StringBuffer buffer = StringBuffer();
-
-    for (int i = indicesToMergeInclusive + 1; i < syllables.length; i++) {
-      buffer.write(syllables[i]);
+  void disposeFragments() {
+    for (final recognizer in wordRecognizers.values) {
+      recognizer.dispose();
     }
-
-    return buffer.toString();
   }
 
-  int? effectiveMaxLines() => overflow == TextOverflow.ellipsis && maxLines == null ? 1 : maxLines;
+  @override
+  void initState() {
+    super.initState();
+    initFragments();
+  }
 
-  bool allowHyphenation(int lines) => overflow != TextOverflow.ellipsis || lines + 1 != effectiveMaxLines();
+  @override
+  void didUpdateWidget(covariant AutoHyphenatingText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+
+    // TODO ? listEquals
+    if (oldWidget.textFragments != widget.textFragments) {
+      initFragments();
+    }
+  }
+
+  @override
+  void dispose() {
+    disposeFragments();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    double getTextWidth(String text, TextStyle? style, TextDirection? direction, double? scaleFactor) {
-      final TextPainter textPainter = TextPainter(
-        text: TextSpan(text: text, style: style),
-        textScaleFactor: scaleFactor ?? MediaQuery.of(context).textScaleFactor,
-        maxLines: 1,
-        textDirection: direction ?? Directionality.of(context),
-      )..layout();
-      return textPainter.size.width;
-    }
-
-    int? getLastSyllableIndex(List<String> syllables, double availableSpace, TextStyle? effectiveTextStyle, int lines) {
-      if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle,
-              textDirection, textScaleFactor) >
-          availableSpace) {
-        return null;
-      }
-
-      int lowerBound = 0;
-      int upperBound = syllables.length;
-
-      while (lowerBound != upperBound - 1) {
-        int testIndex = ((lowerBound + upperBound) * 0.5).floor();
-
-        if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)),
-                effectiveTextStyle, textDirection, textScaleFactor) >
-            availableSpace) {
-          upperBound = testIndex;
-        } else {
-          lowerBound = testIndex;
-        }
-      }
-
-      return lowerBound;
-    }
+    if (widget.textFragments.isEmpty) return const SizedBox();
 
     return LayoutBuilder(builder: (BuildContext context, BoxConstraints constraints) {
-      List<List<String>> fragmentWords = textFragments.map((e) => e.text.split(" ")).toList();
-      List<int> fragmentEnds = [];
-      for (final list in fragmentWords) {
-        fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
-      }
-      List<TextStyle> fragmentStyles = textFragments.map((e) => e.style).toList();
-      int currentFragmentIndex = 0; // count up when reached this framentEnd
-
+      int currentFragmentIndex = 0;
       int currentEnd = fragmentEnds.first;
-      TextStyle currentStyle = fragmentStyles.first; // TODO check empty
+      TextStyle currentStyle = fragmentStyles.first;
+      double singleSpaceWidth = getTextWidth(" ", currentStyle, widget.textDirection, widget.textScaleFactor);
       void updateOnNextFragment(int i) {
         if (i > currentEnd) {
           currentFragmentIndex += 1;
           currentStyle = fragmentStyles[currentFragmentIndex];
           currentEnd = fragmentEnds[currentFragmentIndex];
+          singleSpaceWidth = getTextWidth(" ", currentStyle, widget.textDirection, widget.textScaleFactor);
         }
       }
 
-      List<String> wordsMerged = [
-        for (final list in fragmentWords) //
-          ...list,
-      ];
       List<TextSpan> texts = <TextSpan>[];
 
       assert(globalLoader != null, "AutoHyphenatingText not initialized! Remember to call initHyphenation().");
       final Hyphenator hyphenator = Hyphenator(
-        resource: loader ?? globalLoader!,
+        resource: widget.loader ?? globalLoader!,
         hyphenateSymbol: '_',
       );
 
-      double singleSpaceWidth = getTextWidth(" ", currentStyle, textDirection, textScaleFactor);
       double currentLineSpaceUsed = 0;
       int lines = 0;
 
       double endBuffer = currentStyle.overflow == TextOverflow.ellipsis
-          ? getTextWidth("…", currentStyle, textDirection, textScaleFactor)
+          ? getTextWidth("…", currentStyle, widget.textDirection, widget.textScaleFactor)
           : 0;
 
-      final wordCount = wordsMerged.length;
-      final lastWordIndex = wordCount - 1;
       for (int i = 0; i < wordCount; i++) {
-        double wordWidth = getTextWidth(wordsMerged[i], currentStyle, textDirection, textScaleFactor);
+        final wordRecognizer = wordRecognizers[i];
+        final word = wordsMerged[i];
+        double wordWidth = getTextWidth(word, currentStyle, widget.textDirection, widget.textScaleFactor);
+        late final wordSpan = TextSpan(
+          text: word,
+          style: currentStyle,
+          recognizer: wordRecognizer,
+          mouseCursor: wordRecognizer == null ? null : SystemMouseCursors.click,
+        );
 
         if (currentLineSpaceUsed + wordWidth < constraints.maxWidth - endBuffer) {
-          texts.add(
-            TextSpan(
-              text: wordsMerged[i],
-              style: currentStyle,
-            ),
-          );
+          texts.add(wordSpan);
           currentLineSpaceUsed += wordWidth;
         } else {
-          final List<String> syllables =
-              wordsMerged[i].length == 1 ? <String>[wordsMerged[i]] : hyphenator.hyphenateWordToList(wordsMerged[i]);
-          final int? syllableToUse = wordsMerged[i].length == 1
+          final List<String> syllables = word.length == 1 ? <String>[word] : hyphenator.hyphenateWordToList(word);
+          final int? syllableToUse = word.length == 1
               ? null
               : getLastSyllableIndex(syllables, constraints.maxWidth - currentLineSpaceUsed, currentStyle, lines);
 
           if (syllableToUse == null ||
-              (shouldHyphenate != null && !shouldHyphenate!(constraints.maxWidth, currentLineSpaceUsed, wordWidth))) {
+              (widget.shouldHyphenate != null &&
+                  !widget.shouldHyphenate!(constraints.maxWidth, currentLineSpaceUsed, wordWidth))) {
             if (currentLineSpaceUsed == 0) {
-              texts.add(
-                TextSpan(
-                  text: wordsMerged[i],
-                  style: currentStyle,
-                ),
-              );
+              texts.add(wordSpan);
               currentLineSpaceUsed += wordWidth;
             } else {
               i--;
@@ -202,7 +194,7 @@ class AutoHyphenatingText extends StatelessWidget {
               currentLineSpaceUsed = 0;
               lines++;
               if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-                if (overflow == TextOverflow.ellipsis) {
+                if (widget.overflow == TextOverflow.ellipsis) {
                   texts.add(
                     TextSpan(
                       text: "…",
@@ -230,7 +222,7 @@ class AutoHyphenatingText extends StatelessWidget {
             currentLineSpaceUsed = 0;
             lines++;
             if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-              if (overflow == TextOverflow.ellipsis) {
+              if (widget.overflow == TextOverflow.ellipsis) {
                 texts.add(
                   TextSpan(
                     text: "…",
@@ -263,7 +255,7 @@ class AutoHyphenatingText extends StatelessWidget {
             currentLineSpaceUsed = 0;
             lines++;
             if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-              if (overflow == TextOverflow.ellipsis) {
+              if (widget.overflow == TextOverflow.ellipsis) {
                 texts.add(
                   TextSpan(
                     text: "…",
@@ -281,27 +273,27 @@ class AutoHyphenatingText extends StatelessWidget {
       final SelectionRegistrar? registrar = SelectionContainer.maybeOf(context);
       Widget richText;
 
-      if (selectable) {
+      if (widget.selectable) {
         richText = SelectableText.rich(
-          TextSpan(locale: locale, children: texts),
-          textDirection: textDirection,
-          strutStyle: strutStyle,
-          textScaleFactor: textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
-          textWidthBasis: textWidthBasis ?? TextWidthBasis.parent,
-          textAlign: textAlign ?? TextAlign.start,
-          maxLines: maxLines,
+          TextSpan(locale: widget.locale, children: texts),
+          textDirection: widget.textDirection,
+          strutStyle: widget.strutStyle,
+          textScaleFactor: widget.textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
+          textWidthBasis: widget.textWidthBasis ?? TextWidthBasis.parent,
+          textAlign: widget.textAlign ?? TextAlign.start,
+          maxLines: widget.maxLines,
         );
       } else {
         richText = RichText(
-          textDirection: textDirection,
-          strutStyle: strutStyle,
-          locale: locale,
-          softWrap: softWrap ?? true,
-          overflow: overflow ?? TextOverflow.clip,
-          textScaleFactor: textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
-          textWidthBasis: textWidthBasis ?? TextWidthBasis.parent,
-          selectionColor: selectionColor,
-          textAlign: textAlign ?? TextAlign.start,
+          textDirection: widget.textDirection,
+          strutStyle: widget.strutStyle,
+          locale: widget.locale,
+          softWrap: widget.softWrap ?? true,
+          overflow: widget.overflow ?? TextOverflow.clip,
+          textScaleFactor: widget.textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
+          textWidthBasis: widget.textWidthBasis ?? TextWidthBasis.parent,
+          selectionColor: widget.selectionColor,
+          textAlign: widget.textAlign ?? TextAlign.start,
           selectionRegistrar: registrar,
           text: TextSpan(
             children: texts,
@@ -315,12 +307,77 @@ class AutoHyphenatingText extends StatelessWidget {
         );
       }
       return Semantics(
-        textDirection: textDirection,
-        label: semanticsLabel,
+        textDirection: widget.textDirection,
+        label: widget.semanticsLabel,
         child: ExcludeSemantics(
           child: richText,
         ),
       );
     });
+  }
+
+  String mergeSyllablesFront(List<String> syllables, int indicesToMergeInclusive, {required bool allowHyphen}) {
+    StringBuffer buffer = StringBuffer();
+
+    for (int i = 0; i <= indicesToMergeInclusive; i++) {
+      buffer.write(syllables[i]);
+    }
+
+    // Only write the hyphen if the character is not punctuation
+    String returnString = buffer.toString();
+    if (allowHyphen && !RegExp("\\p{P}", unicode: true).hasMatch(returnString[returnString.length - 1])) {
+      return "$returnString${widget.hyphenationCharacter}";
+    }
+
+    return returnString;
+  }
+
+  String mergeSyllablesBack(List<String> syllables, int indicesToMergeInclusive) {
+    StringBuffer buffer = StringBuffer();
+
+    for (int i = indicesToMergeInclusive + 1; i < syllables.length; i++) {
+      buffer.write(syllables[i]);
+    }
+
+    return buffer.toString();
+  }
+
+  int? effectiveMaxLines() => widget.overflow == TextOverflow.ellipsis && widget.maxLines == null ? 1 : widget.maxLines;
+
+  bool allowHyphenation(int lines) => widget.overflow != TextOverflow.ellipsis || lines + 1 != effectiveMaxLines();
+
+  double getTextWidth(String text, TextStyle? style, TextDirection? direction, double? scaleFactor) {
+    final TextPainter textPainter = TextPainter(
+      text: TextSpan(text: text, style: style),
+      textScaleFactor: scaleFactor ?? MediaQuery.of(context).textScaleFactor,
+      maxLines: 1,
+      textDirection: direction ?? Directionality.of(context),
+    )..layout();
+    return textPainter.size.width;
+  }
+
+  int? getLastSyllableIndex(List<String> syllables, double availableSpace, TextStyle? effectiveTextStyle, int lines) {
+    if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle,
+            widget.textDirection, widget.textScaleFactor) >
+        availableSpace) {
+      return null;
+    }
+
+    int lowerBound = 0;
+    int upperBound = syllables.length;
+
+    while (lowerBound != upperBound - 1) {
+      int testIndex = ((lowerBound + upperBound) * 0.5).floor();
+
+      if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)),
+              effectiveTextStyle, widget.textDirection, widget.textScaleFactor) >
+          availableSpace) {
+        upperBound = testIndex;
+      } else {
+        lowerBound = testIndex;
+      }
+    }
+
+    return lowerBound;
   }
 }
