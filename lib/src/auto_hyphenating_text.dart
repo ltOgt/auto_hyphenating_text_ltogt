@@ -89,8 +89,6 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
   late List<TextStyle> fragmentStyles;
   late List<String> wordsMerged;
   late Map<int, GestureRecognizer> wordRecognizers;
-  late int wordCount;
-  late int lastWordIndex;
   void initFragments() {
     // --------
     fragmentWords = widget.textFragments.map((e) => e.text.split(_kSpace)).toList();
@@ -105,8 +103,6 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       for (final list in fragmentWords) //
         ...list,
     ];
-    wordCount = wordsMerged.length;
-    lastWordIndex = wordCount - 1;
 
     wordRecognizers = {};
     for (int i = 0; i < widget.textFragments.length; i++) {
@@ -210,8 +206,9 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     /// For each word, of all fragments combined (<- fragments can be on same line)
     ///
     /// adjust the base [fragmentWords] and [fragmentEnds]
-    for (int wordIndex = 0; wordIndex < wordCount; wordIndex++) {
+    for (int wordIndex = 0; wordIndex < wordsMerged.length; wordIndex++) {
       // Note: the wordIndex may be changed in the loop body
+      // Note: wordsMerged.length can change during iterations
 
       // Note: even though we may change the wordIndex,
       // we never use another word in this iteration
@@ -233,6 +230,43 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       if (fitsOnLine) {
         texts.add(wordSpan);
         currentLineSpaceUsed += wordWidth;
+
+        // note: wordsMerged.length can change during iterations
+        bool isNotVeryLastWord = wordIndex != wordsMerged.length - 1;
+        if (isNotVeryLastWord) {
+          updateOnNextFragment(wordIndex);
+
+          if (currentLineSpaceUsed + singleSpaceWidth < maxWidth) {
+            texts.add(
+              TextSpan(
+                text: _kSpace,
+                style: currentStyle,
+              ),
+            );
+            currentLineSpaceUsed += singleSpaceWidth;
+            continue;
+          } else {
+            if (texts.last.text == _kSpace) {
+              texts.removeLast();
+            }
+            currentLineSpaceUsed = 0;
+            lines++;
+            if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
+              if (widget.overflow == TextOverflow.ellipsis) {
+                texts.add(
+                  TextSpan(
+                    text: _kEllipsisDots,
+                    style: currentStyle,
+                  ),
+                );
+              }
+              break;
+            }
+            texts.add(const TextSpan(text: _kNewLine));
+            continue;
+          }
+        }
+        continue;
       }
       // ....................................................................... WORD DOES NOT FIT IN LINE, TODO ? split if possible
       // NOTE: we continue or break in every case in this branch
@@ -322,58 +356,6 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
           }
           texts.add(const TextSpan(text: _kNewLine));
           continue;
-        }
-      }
-
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      /// END OF LOOP ADJUSTMENTS
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      ///
-      if (wordIndex != lastWordIndex) {
-        updateOnNextFragment(wordIndex);
-
-        if (currentLineSpaceUsed + singleSpaceWidth < maxWidth) {
-          texts.add(
-            TextSpan(
-              text: _kSpace,
-              style: currentStyle,
-            ),
-          );
-          currentLineSpaceUsed += singleSpaceWidth;
-        } else {
-          if (texts.last.text == _kSpace) {
-            texts.removeLast();
-          }
-          currentLineSpaceUsed = 0;
-          lines++;
-          if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-            if (widget.overflow == TextOverflow.ellipsis) {
-              texts.add(
-                TextSpan(
-                  text: _kEllipsisDots,
-                  style: currentStyle,
-                ),
-              );
-            }
-            break;
-          }
-          texts.add(const TextSpan(text: _kNewLine));
         }
       }
     }
