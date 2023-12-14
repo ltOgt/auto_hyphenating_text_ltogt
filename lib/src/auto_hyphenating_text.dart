@@ -1,8 +1,13 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
 import 'package:hyphenator_impure/hyphenator.dart';
+
+const _kSpace = " ";
+const _kHyphen = '‐';
+const _kNewLine = "\n";
+const _kEllipsisDots = "…";
+const _kHyphenateSymbol = '_';
 
 /// This object is used to tell us acceptable hyphenation positions
 /// It is the default loader used unless a custom one is provided
@@ -19,7 +24,6 @@ typedef TextFragment = ({String text, TextStyle style, VoidCallback? onTap});
 class AutoHyphenatingText extends StatefulWidget {
   const AutoHyphenatingText(
     this.textFragments, {
-    this.shouldHyphenate,
     this.loader,
     this.strutStyle,
     this.textAlign,
@@ -32,7 +36,7 @@ class AutoHyphenatingText extends StatefulWidget {
     this.semanticsLabel,
     this.textWidthBasis,
     this.selectionColor,
-    this.hyphenationCharacter = '‐',
+    this.hyphenationCharacter = _kHyphen,
     this.selectable = false,
     super.key,
   });
@@ -41,9 +45,6 @@ class AutoHyphenatingText extends StatefulWidget {
 
   /// An object that allows for computing acceptable hyphenation locations.
   final ResourceLoader? loader;
-
-  /// A function to tell us if we should apply hyphenation. If not given we will always hyphenate if possible.
-  final bool Function(double totalLineWidth, double lineWidthAlreadyUsed, double currentWordWidth)? shouldHyphenate;
 
   final String hyphenationCharacter;
 
@@ -65,19 +66,40 @@ class AutoHyphenatingText extends StatefulWidget {
 }
 
 class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
-  late List<List<String>> fragmentWords;
-  late List<int> fragmentEnds;
+  @override
+  void initState() {
+    super.initState();
+    initHyphenation();
+  }
+
+  late final Hyphenator hyphenator;
+  void initHypehnator() {
+    assert(globalLoader != null, "AutoHyphenatingText not initialized! Remember to call initHyphenation().");
+
+    hyphenator = Hyphenator(
+      resource: widget.loader ?? globalLoader!, // TODO onChange
+      hyphenateSymbol: _kHyphenateSymbol,
+    );
+  }
+
+  /// List of Words for the fragment.
+  ///
+  /// [initFragments] builds without constraints, unhypehnated
+
   late List<TextStyle> fragmentStyles;
   late List<String> wordsMerged;
   late Map<int, GestureRecognizer> wordRecognizers;
   late int wordCount;
   late int lastWordIndex;
   void initFragments() {
-    fragmentWords = widget.textFragments.map((e) => e.text.split(" ")).toList();
+    // --------
+    fragmentWords = widget.textFragments.map((e) => e.text.split(_kSpace)).toList();
     fragmentEnds = [];
     for (final list in fragmentWords) {
       fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
     }
+    // -------
+
     fragmentStyles = widget.textFragments.map((e) => e.style).toList();
     wordsMerged = [
       for (final list in fragmentWords) //
@@ -105,26 +127,258 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     }
   }
 
-  @override
-  void initState() {
-    super.initState();
-    initFragments();
+  /// List of words in this fragment.
+  ///
+  /// Will be changed during hyphenation.
+  late List<List<String>> fragmentWords;
+  void initializeWords() {
+    fragmentWords = widget.textFragments.map((e) => e.text.split(_kSpace)).toList();
   }
 
-  @override
-  void didUpdateWidget(covariant AutoHyphenatingText oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    // TODO ? listEquals
-    if (oldWidget.textFragments != widget.textFragments) {
-      initFragments();
+  /// Index of the last word in this fragment
+  ///
+  /// Will be changed during hyphenation.
+  late List<int> fragmentEnds;
+  void initializeFragmentEndWordIndex() {
+    fragmentEnds = [];
+    for (final list in fragmentWords) {
+      fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
     }
   }
 
-  @override
-  void dispose() {
-    disposeFragments();
-    super.dispose();
+  /// Constraints for which the last layout was created
+  BoxConstraints previousConstraints = const BoxConstraints(); // TODO can probably just do maxWidth
+
+  /// The result of running the layout for [previousConstraints]
+  List<TextSpan> previousTextSpans = [];
+
+  /// Build TextSpans with better hypenation for [constraints]
+  List<TextSpan> _buildForConstraints(BoxConstraints constraints) {
+    if (constraints == previousConstraints) {
+      return previousTextSpans;
+    }
+    previousConstraints = constraints;
+
+    // (1) build word lists for fragment
+    initializeWords(); // TODO changing this during the algorithm
+    initializeFragmentEndWordIndex(); // TODO need to push these during the algorithm
+
+    // (2) run the algorithm with style per word
+    // !!! just build the gesture recognizers on the fly here
+    // => words added to the fragment
+    // => fragment end indexes
+    return _adjustWordsAndEndsWithHyphenation_andBuildTextSpans(constraints.maxWidth);
+
+    // =========================================================================
+    // =========================================================================
+  }
+
+  List<TextSpan> _adjustWordsAndEndsWithHyphenation_andBuildTextSpans(double maxWidth) {
+    /// Keep track of the fragment we are currently in; only increases
+    int currentFragmentIndex = 0;
+
+    /// Keep track of the index of the last word in the current fragment
+    int currentEnd = fragmentEnds.first;
+
+    /// The style of the current fragment
+    TextStyle currentStyle = fragmentStyles.first;
+
+    /// width for a space in the current style
+    double singleSpaceWidth = getTextWidth(_kSpace, currentStyle, widget.textDirection, widget.textScaleFactor);
+    void updateOnNextFragment(int i) {
+      if (i > currentEnd) {
+        currentFragmentIndex += 1;
+        currentStyle = fragmentStyles[currentFragmentIndex];
+        currentEnd = fragmentEnds[currentFragmentIndex];
+        singleSpaceWidth = getTextWidth(_kSpace, currentStyle, widget.textDirection, widget.textScaleFactor);
+      }
+    }
+
+    // =========================================================================
+
+    List<TextSpan> texts = <TextSpan>[];
+
+    double currentLineSpaceUsed = 0;
+    int lines = 0;
+
+    ///
+    ///
+    ///
+    ///
+    ///
+    ///
+    /// For each word, of all fragments combined (<- fragments can be on same line)
+    ///
+    /// adjust the base [fragmentWords] and [fragmentEnds]
+    for (int wordIndex = 0; wordIndex < wordCount; wordIndex++) {
+      // Note: the wordIndex may be changed in the loop body
+
+      // Note: even though we may change the wordIndex,
+      // we never use another word in this iteration
+      final word = wordsMerged[wordIndex];
+      final wordWidth = getTextWidth(word, currentStyle, widget.textDirection, widget.textScaleFactor);
+      final wordSpan = TextSpan(
+        text: word,
+        style: currentStyle,
+      );
+
+      final bool useEllipsis = currentStyle.overflow == TextOverflow.ellipsis;
+      final double endBuffer = useEllipsis //
+          ? getTextWidth(_kEllipsisDots, currentStyle, widget.textDirection, widget.textScaleFactor)
+          : 0;
+
+      final bool fitsOnLine = currentLineSpaceUsed + wordWidth < maxWidth - endBuffer;
+
+      // ....................................................................... WORD FITS IN LINE, go to end-of-word
+      if (fitsOnLine) {
+        texts.add(wordSpan);
+        currentLineSpaceUsed += wordWidth;
+      }
+      // ....................................................................... WORD DOES NOT FIT IN LINE, TODO ? split if possible
+      // NOTE: we continue or break in every case in this branch
+      else {
+        bool isSingleCharacter = word.length == 1;
+
+        final List<String> syllables = isSingleCharacter //
+            ? [word]
+            : hyphenator.hyphenateWordToList(word);
+
+        final int? lastSyllableIndex = isSingleCharacter //
+            ? null
+            : getLastSyllableIndex(syllables, maxWidth - currentLineSpaceUsed, currentStyle, lines);
+
+        bool isSingleSyllable = lastSyllableIndex == null;
+        bool dontHyphenate = isSingleSyllable;
+
+        /// note: If we dont hyphenate we will break or continue
+        if (dontHyphenate) {
+          bool isFirstWordInLine = currentLineSpaceUsed == 0;
+          if (isFirstWordInLine) {
+            /// The word does not fit onto the line, and can not be hyphonated
+            /// Its the first word in the line
+            /// => We just put it in the line even though it does not fit                                  TODO probably want ellipsis here instead
+            texts.add(wordSpan);
+            currentLineSpaceUsed += wordWidth;
+
+            /// We dont do end of loop adjustments                                                         TODO why
+            continue;
+          } else {
+            /// The word does not fit onto the line, and can not be hyphonated
+            /// Finish up this line and try again on the next one
+
+            /// Remove the trailing space which we added after the previous word from [texts]
+            if (texts.last.text == _kSpace) {
+              texts.removeLast();
+            }
+
+            /// in case we cant try again on the next line, because of maxLines
+            /// add ellpisis and terminate the iteration over words
+            bool canGoToNextLine = effectiveMaxLines() != null && lines + 1 >= effectiveMaxLines()!;
+            if (canGoToNextLine) {
+              if (widget.overflow == TextOverflow.ellipsis) {
+                texts.add(
+                  TextSpan(
+                    text: _kEllipsisDots,
+                    style: currentStyle,
+                  ),
+                );
+              }
+              break;
+            }
+
+            /// Otherwise decrement wordIndex to try again
+            /// on the nex line
+            wordIndex--;
+            currentLineSpaceUsed = 0;
+            lines++;
+
+            texts.add(const TextSpan(text: _kNewLine));
+            continue;
+          }
+        } else {
+          texts.add(
+            TextSpan(
+              text: mergeSyllablesFront(
+                syllables,
+                lastSyllableIndex,
+                allowHyphen: allowHyphenation(lines),
+              ),
+              style: currentStyle,
+            ),
+          );
+          wordsMerged.insert(wordIndex + 1, mergeSyllablesBack(syllables, lastSyllableIndex));
+          currentLineSpaceUsed = 0;
+          lines++;
+          if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
+            if (widget.overflow == TextOverflow.ellipsis) {
+              texts.add(
+                TextSpan(
+                  text: _kEllipsisDots,
+                  style: currentStyle,
+                ),
+              );
+            }
+            break;
+          }
+          texts.add(const TextSpan(text: _kNewLine));
+          continue;
+        }
+      }
+
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      /// END OF LOOP ADJUSTMENTS
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      ///
+      if (wordIndex != lastWordIndex) {
+        updateOnNextFragment(wordIndex);
+
+        if (currentLineSpaceUsed + singleSpaceWidth < maxWidth) {
+          texts.add(
+            TextSpan(
+              text: _kSpace,
+              style: currentStyle,
+            ),
+          );
+          currentLineSpaceUsed += singleSpaceWidth;
+        } else {
+          if (texts.last.text == _kSpace) {
+            texts.removeLast();
+          }
+          currentLineSpaceUsed = 0;
+          lines++;
+          if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
+            if (widget.overflow == TextOverflow.ellipsis) {
+              texts.add(
+                TextSpan(
+                  text: _kEllipsisDots,
+                  style: currentStyle,
+                ),
+              );
+            }
+            break;
+          }
+          texts.add(const TextSpan(text: _kNewLine));
+        }
+      }
+    }
+
+    return texts;
   }
 
   @override
@@ -132,143 +386,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     if (widget.textFragments.isEmpty) return const SizedBox();
 
     return LayoutBuilder(builder: (BuildContext context, BoxConstraints constraints) {
-      int currentFragmentIndex = 0;
-      int currentEnd = fragmentEnds.first;
-      TextStyle currentStyle = fragmentStyles.first;
-      double singleSpaceWidth = getTextWidth(" ", currentStyle, widget.textDirection, widget.textScaleFactor);
-      void updateOnNextFragment(int i) {
-        if (i > currentEnd) {
-          currentFragmentIndex += 1;
-          currentStyle = fragmentStyles[currentFragmentIndex];
-          currentEnd = fragmentEnds[currentFragmentIndex];
-          singleSpaceWidth = getTextWidth(" ", currentStyle, widget.textDirection, widget.textScaleFactor);
-        }
-      }
-
-      List<TextSpan> texts = <TextSpan>[];
-
-      assert(globalLoader != null, "AutoHyphenatingText not initialized! Remember to call initHyphenation().");
-      final Hyphenator hyphenator = Hyphenator(
-        resource: widget.loader ?? globalLoader!,
-        hyphenateSymbol: '_',
-      );
-
-      double currentLineSpaceUsed = 0;
-      int lines = 0;
-
-      double endBuffer = currentStyle.overflow == TextOverflow.ellipsis
-          ? getTextWidth("…", currentStyle, widget.textDirection, widget.textScaleFactor)
-          : 0;
-
-      for (int i = 0; i < wordCount; i++) {
-        final wordRecognizer = wordRecognizers[i];
-        final word = wordsMerged[i];
-        double wordWidth = getTextWidth(word, currentStyle, widget.textDirection, widget.textScaleFactor);
-        late final wordSpan = TextSpan(
-          text: word,
-          style: currentStyle,
-          recognizer: wordRecognizer,
-          mouseCursor: wordRecognizer == null ? null : SystemMouseCursors.click,
-        );
-
-        if (currentLineSpaceUsed + wordWidth < constraints.maxWidth - endBuffer) {
-          texts.add(wordSpan);
-          currentLineSpaceUsed += wordWidth;
-        } else {
-          final List<String> syllables = word.length == 1 ? <String>[word] : hyphenator.hyphenateWordToList(word);
-          final int? syllableToUse = word.length == 1
-              ? null
-              : getLastSyllableIndex(syllables, constraints.maxWidth - currentLineSpaceUsed, currentStyle, lines);
-
-          if (syllableToUse == null ||
-              (widget.shouldHyphenate != null &&
-                  !widget.shouldHyphenate!(constraints.maxWidth, currentLineSpaceUsed, wordWidth))) {
-            if (currentLineSpaceUsed == 0) {
-              texts.add(wordSpan);
-              currentLineSpaceUsed += wordWidth;
-            } else {
-              i--;
-              if (texts.last.text == " ") {
-                texts.removeLast();
-              }
-              currentLineSpaceUsed = 0;
-              lines++;
-              if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-                if (widget.overflow == TextOverflow.ellipsis) {
-                  texts.add(
-                    TextSpan(
-                      text: "…",
-                      style: currentStyle,
-                    ),
-                  );
-                }
-                break;
-              }
-              texts.add(const TextSpan(text: "\n"));
-            }
-            continue;
-          } else {
-            texts.add(
-              TextSpan(
-                text: mergeSyllablesFront(
-                  syllables,
-                  syllableToUse,
-                  allowHyphen: allowHyphenation(lines),
-                ),
-                style: currentStyle,
-              ),
-            );
-            wordsMerged.insert(i + 1, mergeSyllablesBack(syllables, syllableToUse));
-            currentLineSpaceUsed = 0;
-            lines++;
-            if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-              if (widget.overflow == TextOverflow.ellipsis) {
-                texts.add(
-                  TextSpan(
-                    text: "…",
-                    style: currentStyle,
-                  ),
-                );
-              }
-              break;
-            }
-            texts.add(const TextSpan(text: "\n"));
-            continue;
-          }
-        }
-
-        if (i != lastWordIndex) {
-          updateOnNextFragment(i);
-
-          if (currentLineSpaceUsed + singleSpaceWidth < constraints.maxWidth) {
-            texts.add(
-              TextSpan(
-                text: " ",
-                style: currentStyle,
-              ),
-            );
-            currentLineSpaceUsed += singleSpaceWidth;
-          } else {
-            if (texts.last.text == " ") {
-              texts.removeLast();
-            }
-            currentLineSpaceUsed = 0;
-            lines++;
-            if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
-              if (widget.overflow == TextOverflow.ellipsis) {
-                texts.add(
-                  TextSpan(
-                    text: "…",
-                    style: currentStyle,
-                  ),
-                );
-              }
-              break;
-            }
-            texts.add(const TextSpan(text: "\n"));
-          }
-        }
-      }
+      final texts = _buildForConstraints(constraints);
 
       final SelectionRegistrar? registrar = SelectionContainer.maybeOf(context);
       Widget richText;

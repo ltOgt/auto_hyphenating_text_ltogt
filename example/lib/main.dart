@@ -59,7 +59,7 @@ class _GermanExampleState extends State<GermanExample> {
                   ),
                   (
                     text:
-                        ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
                     style: const TextStyle(color: Colors.blue),
                     onTap: () {
                       print("Moin");
@@ -67,7 +67,7 @@ class _GermanExampleState extends State<GermanExample> {
                   ),
                   (
                     text:
-                        ' Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
                     style: const TextStyle(color: Colors.black),
                     onTap: null,
                   ),
