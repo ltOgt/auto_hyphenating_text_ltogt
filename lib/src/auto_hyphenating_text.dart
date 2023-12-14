@@ -181,7 +181,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
     /// width for a space in the current style
     double singleSpaceWidth = getTextWidth(_kSpace, currentStyle, widget.textDirection, widget.textScaleFactor);
-    void updateOnNextFragment(int i) {
+    void updateIfEnteredNewFragment(int i) {
       if (i > currentEnd) {
         currentFragmentIndex += 1;
         currentStyle = fragmentStyles[currentFragmentIndex];
@@ -210,6 +210,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       // Note: the wordIndex may be changed in the loop body
       // Note: wordsMerged.length can change during iterations
 
+      updateIfEnteredNewFragment(wordIndex);
+
       // Note: even though we may change the wordIndex,
       // we never use another word in this iteration
       final word = wordsMerged[wordIndex];
@@ -226,29 +228,42 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
       final bool fitsOnLine = currentLineSpaceUsed + wordWidth < maxWidth - endBuffer;
 
+      void addSpaceAfter() {
+        texts.add(
+          TextSpan(
+            text: _kSpace,
+            style: currentStyle,
+          ),
+        );
+        currentLineSpaceUsed += singleSpaceWidth;
+      }
+
+      void deletePreviouslyAddedSpace() {
+        // TODO: original compares against a constant, which is added by the equivalent of addSpaceAfter
+        //  should probably do the same here, instead of potentially removing user added space
+        if (texts.last.text == _kSpace) {
+          texts.removeLast();
+        }
+      }
+
       // ....................................................................... WORD FITS IN LINE, go to end-of-word
+      // NOTE: we continue or break in every case in this branch
       if (fitsOnLine) {
         texts.add(wordSpan);
         currentLineSpaceUsed += wordWidth;
 
+        /// If this was not the very last word, add a space before the next one
+        /// we will remove it if the next word does not fit.
         // note: wordsMerged.length can change during iterations
-        bool isNotVeryLastWord = wordIndex != wordsMerged.length - 1;
-        if (isNotVeryLastWord) {
-          updateOnNextFragment(wordIndex);
-
-          if (currentLineSpaceUsed + singleSpaceWidth < maxWidth) {
-            texts.add(
-              TextSpan(
-                text: _kSpace,
-                style: currentStyle,
-              ),
-            );
-            currentLineSpaceUsed += singleSpaceWidth;
+        bool anticipateNextWord = wordIndex != wordsMerged.length - 1;
+        if (anticipateNextWord) {
+          bool spaceFitsOnLine = currentLineSpaceUsed + singleSpaceWidth < maxWidth;
+          if (spaceFitsOnLine) {
+            addSpaceAfter();
             continue;
           } else {
-            if (texts.last.text == _kSpace) {
-              texts.removeLast();
-            }
+            /// Space does not fit on line
+            deletePreviouslyAddedSpace();
             currentLineSpaceUsed = 0;
             lines++;
             if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
@@ -301,9 +316,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             /// Finish up this line and try again on the next one
 
             /// Remove the trailing space which we added after the previous word from [texts]
-            if (texts.last.text == _kSpace) {
-              texts.removeLast();
-            }
+            deletePreviouslyAddedSpace();
 
             /// in case we cant try again on the next line, because of maxLines
             /// add ellpisis and terminate the iteration over words
@@ -330,6 +343,11 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             continue;
           }
         } else {
+          /// The word does not fit onto the line, and we can hyphonate
+
+          // TODO !!!!!!!!!!!!!!!!!!!!! need to mainly make adjustments here
+          //  we insert into wordsMerged here
+
           texts.add(
             TextSpan(
               text: mergeSyllablesFront(
