@@ -24,7 +24,27 @@ typedef TextFragment = ({String text, TextStyle style, VoidCallback? onTap});
 
 /// A replacement for the default text object which supports hyphenation.
 class AutoHyphenatingText extends StatefulWidget {
-  const AutoHyphenatingText(
+  AutoHyphenatingText(
+    String text, {
+    TextStyle textStyle = const TextStyle(),
+    this.loader,
+    this.strutStyle,
+    this.textAlign,
+    this.textDirection,
+    this.locale,
+    this.softWrap,
+    this.overflow,
+    this.textScaleFactor,
+    this.maxLines,
+    this.semanticsLabel,
+    this.textWidthBasis,
+    this.selectionColor,
+    this.hyphenationCharacter = _kHyphen,
+    this.selectable = false,
+    super.key,
+  }) : this.textFragments = [(text: text, style: textStyle, onTap: null)];
+
+  const AutoHyphenatingText.rich(
     this.textFragments, {
     this.loader,
     this.strutStyle,
@@ -502,8 +522,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
           locale: widget.locale,
           softWrap: widget.softWrap ?? true,
           overflow: widget.overflow ?? TextOverflow.clip,
-          textScaleFactor: widget.textScaleFactor ?? MediaQuery.of(context).textScaleFactor,
           textWidthBasis: widget.textWidthBasis ?? TextWidthBasis.parent,
+          textScaler: TextScaler.linear(widget.textScaleFactor ?? MediaQuery.of(context).textScaleFactor),
           selectionColor: widget.selectionColor,
           textAlign: widget.textAlign ?? TextAlign.start,
           selectionRegistrar: registrar,
@@ -571,9 +591,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
   }
 
   int? getLastSyllableIndex(List<String> syllables, double availableSpace, TextStyle? effectiveTextStyle, int lines) {
-    if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle,
-            widget.textDirection, widget.textScaleFactor) >
-        availableSpace) {
+    if (getTextWidth(mergeSyllablesFront(syllables, 0, allowHyphen: allowHyphenation(lines)), effectiveTextStyle, widget.textDirection, widget.textScaleFactor) > availableSpace) {
       return null;
     }
 
@@ -583,9 +601,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     while (lowerBound != upperBound - 1) {
       int testIndex = ((lowerBound + upperBound) * 0.5).floor();
 
-      if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)),
-              effectiveTextStyle, widget.textDirection, widget.textScaleFactor) >
-          availableSpace) {
+      if (getTextWidth(mergeSyllablesFront(syllables, testIndex, allowHyphen: allowHyphenation(lines)), effectiveTextStyle, widget.textDirection, widget.textScaleFactor) > availableSpace) {
         upperBound = testIndex;
       } else {
         lowerBound = testIndex;
@@ -595,57 +611,3 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     return lowerBound;
   }
 }
-
-
-/**
- * 
- flutter: ü ===========================================
-flutter: ü ============================================
-flutter: ü =============================================
-flutter: ü _buildForConstraints BoxConstraints(0.0<=w<=463.0, 0.0<=h<=244.0)
-flutter: ü changed max width: (459.0 => 463.0)
-flutter: ü initialized fragmentEnds: [2, 4, 6]
-flutter: ü initialized wordsMerged: [automatische, Silbentrennung, automatische, Silbentrennung, automatische, Silbentrennung]
-flutter: ü ............................
-flutter: ü wordIndex: 0
-flutter: ü word: automatische (88.9970703125)
-flutter: ü fits on line
-flutter: ü adding space
-flutter: ü ............................
-flutter: ü wordIndex: 1
-flutter: ü word: Silbentrennung (100.10546875)
-flutter: ü fits on line
-flutter: ü adding space
-flutter: ü ............................
-flutter: ü wordIndex: 2
-flutter: ü word: automatische (88.9970703125)
-flutter: ü fits on line
-flutter: ü adding space
-flutter: ü ............................
-flutter: ü wordIndex: 3
-flutter: ü newFragment(index: 1, end: 4)
-flutter: ü word: Silbentrennung (100.10546875)
-flutter: ü fits on line
-flutter: ü adding space
-flutter: ü ............................
-flutter: ü wordIndex: 4
-flutter: ü word: automatische (88.9970703125)
-flutter: ü does not fit on line
-flutter: ü syllables: [auto, ma, ti, sche] (hypenate: true)
-flutter: ü hyphenate
-flutter: ü Added part before hyphen to texts: automati‐
-flutter: ü Added part after to the words list, not yet to texts: sche
-flutter: ü Adjusted fragmentEnds: [2, 5, 7]
-flutter: ü add linebreak to texts
-flutter: ü ............................
-flutter: ü wordIndex: 5
-flutter: ü newFragment(index: 2, end: 7)
-flutter: ü word: sche (31.3974609375)
-flutter: ü fits on line
-flutter: ü adding space
-flutter: ü ............................
-flutter: ü wordIndex: 6
-flutter: ü word: Silbentrennung (100.10546875)
-flutter: ü fits on line
-flutter: ü Next word not anticipated
- */
