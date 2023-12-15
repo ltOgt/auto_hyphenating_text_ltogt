@@ -52,22 +52,19 @@ class _GermanExampleState extends State<GermanExample> {
               child: AutoHyphenatingText(
                 [
                   (
-                    text:
-                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    text: 'automatische Silbentrennung',
                     style: const TextStyle(color: Colors.black),
                     onTap: null,
                   ),
                   (
-                    text:
-                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    text: 'automatische Silbentrennung',
                     style: const TextStyle(color: Colors.blue),
                     onTap: () {
                       print("Moin");
                     },
                   ),
                   (
-                    text:
-                        'Ändern Sie die Größe dieses Fensters, um die automatische Silbentrennung in Aktion zu sehen.',
+                    text: 'automatische Silbentrennung',
                     style: const TextStyle(color: Colors.black),
                     onTap: null,
                   ),

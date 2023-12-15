@@ -1,4 +1,5 @@
-import 'package:flutter/gestures.dart';
+// ignore_for_file: non_constant_identifier_names
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:hyphenator_impure/hyphenator.dart';
@@ -69,107 +70,120 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
   @override
   void initState() {
     super.initState();
-    initHyphenation();
+    _print("initState");
+
+    /// Not changed during hypenation
+    // TODO didUpdate
+    _initHyphenator();
+    _initializeFragmentWords();
+    _initializeFragmentStyles();
   }
 
   late final Hyphenator hyphenator;
-  void initHypehnator() {
+  void _initHyphenator() {
     assert(globalLoader != null, "AutoHyphenatingText not initialized! Remember to call initHyphenation().");
 
     hyphenator = Hyphenator(
-      resource: widget.loader ?? globalLoader!, // TODO onChange
+      resource: widget.loader ?? globalLoader!,
       hyphenateSymbol: _kHyphenateSymbol,
     );
   }
 
   /// List of Words for the fragment.
   ///
-  /// [initFragments] builds without constraints, unhypehnated
-
+  /// Will NOT be changed during [_hyphenate].
   late List<TextStyle> fragmentStyles;
-  late List<String> wordsMerged;
-  late Map<int, GestureRecognizer> wordRecognizers;
-  void initFragments() {
-    // --------
-    fragmentWords = widget.textFragments.map((e) => e.text.split(_kSpace)).toList();
-    fragmentEnds = [];
-    for (final list in fragmentWords) {
-      fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
-    }
-    // -------
-
+  void _initializeFragmentStyles() {
     fragmentStyles = widget.textFragments.map((e) => e.style).toList();
-    wordsMerged = [
-      for (final list in fragmentWords) //
-        ...list,
-    ];
-
-    wordRecognizers = {};
-    for (int i = 0; i < widget.textFragments.length; i++) {
-      final callback = widget.textFragments[i].onTap;
-      if (callback == null) continue;
-
-      final start = (i == 0) ? 0 : fragmentEnds[i - 1];
-      final count = fragmentWords[i].length;
-      for (int i = start; i < start + count; i++) {
-        wordRecognizers[i] = TapGestureRecognizer()..onTap = callback;
-      }
-    }
-  }
-
-  void disposeFragments() {
-    for (final recognizer in wordRecognizers.values) {
-      recognizer.dispose();
-    }
+    _print("initialized fragmentStyles");
   }
 
   /// List of words in this fragment.
   ///
-  /// Will be changed during hyphenation.
+  /// Will NOT be changed during [_hyphenate].
   late List<List<String>> fragmentWords;
-  void initializeWords() {
+  void _initializeFragmentWords() {
     fragmentWords = widget.textFragments.map((e) => e.text.split(_kSpace)).toList();
+    _print("initialized fragmentWords: $fragmentWords");
+  }
+
+  /// All words from all fragments combined.
+  ///
+  /// will be changed in [_hyphenate]
+  /// on hyphenation
+  late List<String> wordsMerged;
+  void _initializeWordsMerged() {
+    wordsMerged = [
+      for (final list in fragmentWords) //
+        ...list,
+    ];
+    _print("initialized wordsMerged: $wordsMerged");
   }
 
   /// Index of the last word in this fragment
   ///
-  /// Will be changed during hyphenation.
+  /// Will be changed during [_hyphenate].
   late List<int> fragmentEnds;
-  void initializeFragmentEndWordIndex() {
+  void _initializeFragmentEndWordIndex() {
     fragmentEnds = [];
     for (final list in fragmentWords) {
       fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
     }
+    _print("initialized fragmentEnds: $fragmentEnds");
   }
 
+  //late Map<int, GestureRecognizer> wordRecognizers; // TODO no on tap right now
+  void _disposeRecognizers() {
+    // for (final recognizer in wordRecognizers.values) {
+    //   recognizer.dispose();
+    // }
+  }
+
+  ///
+  ///
+  ///
+  ///
+  ///
+  ///
+
   /// Constraints for which the last layout was created
-  BoxConstraints previousConstraints = const BoxConstraints(); // TODO can probably just do maxWidth
+  double previousMaxWidth = 0;
 
   /// The result of running the layout for [previousConstraints]
   List<TextSpan> previousTextSpans = [];
 
+  void _print(dynamic msg) => print("ü $msg");
+
   /// Build TextSpans with better hypenation for [constraints]
   List<TextSpan> _buildForConstraints(BoxConstraints constraints) {
-    if (constraints == previousConstraints) {
+    _print("===========================================");
+    _print("============================================");
+    _print("=============================================");
+    _print("_buildForConstraints $constraints");
+
+    final maxWidth = constraints.maxWidth;
+    if (maxWidth == previousMaxWidth) {
+      _print("same max width: $maxWidth");
       return previousTextSpans;
     }
-    previousConstraints = constraints;
+    _print("changed max width: ($previousMaxWidth => $maxWidth)");
+    previousMaxWidth = maxWidth;
 
     // (1) build word lists for fragment
-    initializeWords(); // TODO changing this during the algorithm
-    initializeFragmentEndWordIndex(); // TODO need to push these during the algorithm
+    _initializeFragmentEndWordIndex(); // TODO need to push these during the algorithm
+    _initializeWordsMerged();
 
     // (2) run the algorithm with style per word
     // !!! just build the gesture recognizers on the fly here
     // => words added to the fragment
     // => fragment end indexes
-    return _adjustWordsAndEndsWithHyphenation_andBuildTextSpans(constraints.maxWidth);
+    return _hyphenate(constraints.maxWidth);
 
     // =========================================================================
     // =========================================================================
   }
 
-  List<TextSpan> _adjustWordsAndEndsWithHyphenation_andBuildTextSpans(double maxWidth) {
+  List<TextSpan> _hyphenate(double maxWidth) {
     /// Keep track of the fragment we are currently in; only increases
     int currentFragmentIndex = 0;
 
@@ -187,15 +201,35 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
         currentStyle = fragmentStyles[currentFragmentIndex];
         currentEnd = fragmentEnds[currentFragmentIndex];
         singleSpaceWidth = getTextWidth(_kSpace, currentStyle, widget.textDirection, widget.textScaleFactor);
+
+        _print("newFragment(index: $currentFragmentIndex, end: $currentEnd)");
       }
     }
 
     // =========================================================================
+    double currentLineSpaceUsed = 0;
+    int lineCounter = 0;
 
     List<TextSpan> texts = <TextSpan>[];
 
-    double currentLineSpaceUsed = 0;
-    int lines = 0;
+    void addSpaceAfter() {
+      texts.add(
+        TextSpan(
+          text: _kSpace,
+          style: currentStyle,
+        ),
+      );
+      currentLineSpaceUsed += singleSpaceWidth;
+    }
+
+    // TODO: original compares against a constant, which is added by the equivalent of addSpaceAfter
+    //  should probably do the same here, instead of potentially removing user added space
+    void deletePreviouslyAddedSpace() {
+      if (texts.last.text == _kSpace) {
+        _print("removing previous space");
+        texts.removeLast();
+      }
+    }
 
     ///
     ///
@@ -207,6 +241,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     ///
     /// adjust the base [fragmentWords] and [fragmentEnds]
     for (int wordIndex = 0; wordIndex < wordsMerged.length; wordIndex++) {
+      _print("............................");
+      _print("wordIndex: $wordIndex");
       // Note: the wordIndex may be changed in the loop body
       // Note: wordsMerged.length can change during iterations
 
@@ -220,6 +256,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
         text: word,
         style: currentStyle,
       );
+      _print("word: $word ($wordWidth)");
 
       final bool useEllipsis = currentStyle.overflow == TextOverflow.ellipsis;
       final double endBuffer = useEllipsis //
@@ -228,27 +265,10 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
       final bool fitsOnLine = currentLineSpaceUsed + wordWidth < maxWidth - endBuffer;
 
-      void addSpaceAfter() {
-        texts.add(
-          TextSpan(
-            text: _kSpace,
-            style: currentStyle,
-          ),
-        );
-        currentLineSpaceUsed += singleSpaceWidth;
-      }
-
-      void deletePreviouslyAddedSpace() {
-        // TODO: original compares against a constant, which is added by the equivalent of addSpaceAfter
-        //  should probably do the same here, instead of potentially removing user added space
-        if (texts.last.text == _kSpace) {
-          texts.removeLast();
-        }
-      }
-
       // ....................................................................... WORD FITS IN LINE, go to end-of-word
       // NOTE: we continue or break in every case in this branch
       if (fitsOnLine) {
+        _print("fits on line");
         texts.add(wordSpan);
         currentLineSpaceUsed += wordWidth;
 
@@ -259,14 +279,18 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
         if (anticipateNextWord) {
           bool spaceFitsOnLine = currentLineSpaceUsed + singleSpaceWidth < maxWidth;
           if (spaceFitsOnLine) {
+            _print("adding space");
             addSpaceAfter();
             continue;
           } else {
+            _print("space does not fit");
+
             /// Space does not fit on line
             deletePreviouslyAddedSpace();
             currentLineSpaceUsed = 0;
-            lines++;
-            if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
+            lineCounter++;
+            if (effectiveMaxLines() != null && lineCounter >= effectiveMaxLines()!) {
+              _print("maxLines");
               if (widget.overflow == TextOverflow.ellipsis) {
                 texts.add(
                   TextSpan(
@@ -277,15 +301,18 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
               }
               break;
             }
+            _print("adding lineBreak");
             texts.add(const TextSpan(text: _kNewLine));
             continue;
           }
         }
+        _print("Next word not anticipated");
         continue;
       }
       // ....................................................................... WORD DOES NOT FIT IN LINE, TODO ? split if possible
       // NOTE: we continue or break in every case in this branch
       else {
+        _print("does not fit on line");
         bool isSingleCharacter = word.length == 1;
 
         final List<String> syllables = isSingleCharacter //
@@ -294,15 +321,20 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
         final int? lastSyllableIndex = isSingleCharacter //
             ? null
-            : getLastSyllableIndex(syllables, maxWidth - currentLineSpaceUsed, currentStyle, lines);
+            : getLastSyllableIndex(syllables, maxWidth - currentLineSpaceUsed, currentStyle, lineCounter);
 
         bool isSingleSyllable = lastSyllableIndex == null;
         bool dontHyphenate = isSingleSyllable;
 
+        _print("syllables: $syllables (hypenate: ${!dontHyphenate})");
+
         /// note: If we dont hyphenate we will break or continue
         if (dontHyphenate) {
+          _print("dont hyphenate");
           bool isFirstWordInLine = currentLineSpaceUsed == 0;
           if (isFirstWordInLine) {
+            _print("is first word, adding");
+
             /// The word does not fit onto the line, and can not be hyphonated
             /// Its the first word in the line
             /// => We just put it in the line even though it does not fit                                  TODO probably want ellipsis here instead
@@ -312,6 +344,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             /// We dont do end of loop adjustments                                                         TODO why
             continue;
           } else {
+            _print("has words before it on its line");
+
             /// The word does not fit onto the line, and can not be hyphonated
             /// Finish up this line and try again on the next one
 
@@ -320,8 +354,9 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
             /// in case we cant try again on the next line, because of maxLines
             /// add ellpisis and terminate the iteration over words
-            bool canGoToNextLine = effectiveMaxLines() != null && lines + 1 >= effectiveMaxLines()!;
-            if (canGoToNextLine) {
+            bool canNotGoToNextLine = effectiveMaxLines() != null && lineCounter + 1 >= effectiveMaxLines()!;
+            if (canNotGoToNextLine) {
+              _print("maxLines");
               if (widget.overflow == TextOverflow.ellipsis) {
                 texts.add(
                   TextSpan(
@@ -337,31 +372,45 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             /// on the nex line
             wordIndex--;
             currentLineSpaceUsed = 0;
-            lines++;
+            lineCounter++;
+            _print("moving to next line and retry word: $lineCounter");
 
             texts.add(const TextSpan(text: _kNewLine));
             continue;
           }
         } else {
-          /// The word does not fit onto the line, and we can hyphonate
+          /// The word does not fit onto the line, and WE CAN HYPHONATE
+          _print("hyphenate");
 
           // TODO !!!!!!!!!!!!!!!!!!!!! need to mainly make adjustments here
           //  we insert into wordsMerged here
 
+          final wordPartBefore = mergeSyllablesFront(
+            syllables,
+            lastSyllableIndex,
+            allowHyphen: allowHyphenation(lineCounter),
+          );
           texts.add(
             TextSpan(
-              text: mergeSyllablesFront(
-                syllables,
-                lastSyllableIndex,
-                allowHyphen: allowHyphenation(lines),
-              ),
+              text: wordPartBefore,
               style: currentStyle,
             ),
           );
-          wordsMerged.insert(wordIndex + 1, mergeSyllablesBack(syllables, lastSyllableIndex));
+          _print("Added part before hyphen to texts: $wordPartBefore");
+
+          final wordPartAfter = mergeSyllablesBack(syllables, lastSyllableIndex);
+          wordsMerged.insert(wordIndex + 1, wordPartAfter);
+          _print("Added part after to the words list, not yet to texts: $wordPartAfter");
+
+          for (int i = currentFragmentIndex; i < fragmentWords.length; i++) {
+            fragmentEnds[i] += 1;
+          }
+          _print("Adjusted fragmentEnds: $fragmentEnds");
+
           currentLineSpaceUsed = 0;
-          lines++;
-          if (effectiveMaxLines() != null && lines >= effectiveMaxLines()!) {
+          lineCounter++;
+          if (effectiveMaxLines() != null && lineCounter >= effectiveMaxLines()!) {
+            _print("maxLines");
             if (widget.overflow == TextOverflow.ellipsis) {
               texts.add(
                 TextSpan(
@@ -372,6 +421,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             }
             break;
           }
+
+          _print("add linebreak to texts");
           texts.add(const TextSpan(text: _kNewLine));
           continue;
         }
@@ -499,3 +550,57 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     return lowerBound;
   }
 }
+
+
+/**
+ * 
+ flutter: ü ===========================================
+flutter: ü ============================================
+flutter: ü =============================================
+flutter: ü _buildForConstraints BoxConstraints(0.0<=w<=463.0, 0.0<=h<=244.0)
+flutter: ü changed max width: (459.0 => 463.0)
+flutter: ü initialized fragmentEnds: [2, 4, 6]
+flutter: ü initialized wordsMerged: [automatische, Silbentrennung, automatische, Silbentrennung, automatische, Silbentrennung]
+flutter: ü ............................
+flutter: ü wordIndex: 0
+flutter: ü word: automatische (88.9970703125)
+flutter: ü fits on line
+flutter: ü adding space
+flutter: ü ............................
+flutter: ü wordIndex: 1
+flutter: ü word: Silbentrennung (100.10546875)
+flutter: ü fits on line
+flutter: ü adding space
+flutter: ü ............................
+flutter: ü wordIndex: 2
+flutter: ü word: automatische (88.9970703125)
+flutter: ü fits on line
+flutter: ü adding space
+flutter: ü ............................
+flutter: ü wordIndex: 3
+flutter: ü newFragment(index: 1, end: 4)
+flutter: ü word: Silbentrennung (100.10546875)
+flutter: ü fits on line
+flutter: ü adding space
+flutter: ü ............................
+flutter: ü wordIndex: 4
+flutter: ü word: automatische (88.9970703125)
+flutter: ü does not fit on line
+flutter: ü syllables: [auto, ma, ti, sche] (hypenate: true)
+flutter: ü hyphenate
+flutter: ü Added part before hyphen to texts: automati‐
+flutter: ü Added part after to the words list, not yet to texts: sche
+flutter: ü Adjusted fragmentEnds: [2, 5, 7]
+flutter: ü add linebreak to texts
+flutter: ü ............................
+flutter: ü wordIndex: 5
+flutter: ü newFragment(index: 2, end: 7)
+flutter: ü word: sche (31.3974609375)
+flutter: ü fits on line
+flutter: ü adding space
+flutter: ü ............................
+flutter: ü wordIndex: 6
+flutter: ü word: Silbentrennung (100.10546875)
+flutter: ü fits on line
+flutter: ü Next word not anticipated
+ */
