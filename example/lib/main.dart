@@ -85,14 +85,19 @@ class _GermanExampleState extends State<GermanExample> {
                           onTap: null,
                         ),
                         (
-                          text: 'automatische Silbentrennung',
+                          text: ' ',
+                          style: const TextStyle(backgroundColor: Colors.red),
+                          onTap: null,
+                        ),
+                        (
+                          text: 'automatische Silbentrennung auto',
                           style: const TextStyle(color: Colors.blue),
                           onTap: () {
                             print("Moin");
                           },
                         ),
                         (
-                          text: 'automatische Silbentrennung',
+                          text: 'matische Silbentrennung',
                           style: const TextStyle(color: Colors.black),
                           onTap: null,
                         ),

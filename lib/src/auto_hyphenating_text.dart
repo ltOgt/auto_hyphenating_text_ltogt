@@ -288,6 +288,13 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       );
       //_print("word: $word ($wordWidth)");
 
+      // bool isEmptyCharacter = word.isEmpty;
+      // if (isEmptyCharacter) {
+      //   print("empty"); // "a.b..c...d" => a_,b_,_,c_,_,_,d_
+      // }
+
+      bool isLastInFragment = wordIndex == currentEnd;
+
       final bool useEllipsis = currentStyle.overflow == TextOverflow.ellipsis;
       final double endBuffer = useEllipsis //
           ? getTextWidth(_kEllipsisDots, currentStyle, widget.textDirection, widget.textScaleFactor)
@@ -310,7 +317,9 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
           bool spaceFitsOnLine = currentLineSpaceUsed + singleSpaceWidth < maxWidth;
           if (spaceFitsOnLine) {
             //_print("adding space");
-            addSpaceAfter();
+            if (!isLastInFragment) {
+              addSpaceAfter();
+            }
             continue;
           } else {
             //_print("space does not fit");
@@ -342,7 +351,6 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       // ....................................................................... WORD DOES NOT FIT IN LINE
       // NOTE: we continue or break in every case in this branch
       else {
-        //_print("does not fit on line");
         bool isSingleCharacter = word.length == 1;
 
         final List<String> syllables = isSingleCharacter //
