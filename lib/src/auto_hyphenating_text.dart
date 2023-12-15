@@ -1,5 +1,6 @@
 // ignore_for_file: non_constant_identifier_names
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:hyphenator_impure/hyphenator.dart';
@@ -42,7 +43,7 @@ class AutoHyphenatingText extends StatefulWidget {
     super.key,
   });
 
-  final List<TextFragment> textFragments; // TODO removed effective text style stuff, need to be explicit
+  final List<TextFragment> textFragments; // note: removed effective text style stuff, need to be explicit
 
   /// An object that allows for computing acceptable hyphenation locations.
   final ResourceLoader? loader;
@@ -77,6 +78,12 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     _initHyphenator();
     _initializeFragmentWords();
     _initializeFragmentStyles();
+  }
+
+  @override
+  void dispose() {
+    _disposeRecognizers();
+    super.dispose();
   }
 
   late final Hyphenator hyphenator;
@@ -132,11 +139,21 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     //_print("initialized fragmentEnds: $fragmentEnds");
   }
 
-  //late Map<int, GestureRecognizer> wordRecognizers; // TODO no on tap right now
+  Map<int, GestureRecognizer> wordRecognizers = {};
+  GestureRecognizer? _registerRecognizer(int wordIndex, int fragmentIndex) {
+    final callback = widget.textFragments[fragmentIndex].onTap;
+    if (callback == null) return null;
+
+    final recognizer = TapGestureRecognizer()..onTap = callback;
+    wordRecognizers[wordIndex] = recognizer;
+    return recognizer;
+  }
+
   void _disposeRecognizers() {
-    // for (final recognizer in wordRecognizers.values) {
-    //   recognizer.dispose();
-    // }
+    for (final recognizer in wordRecognizers.values) {
+      recognizer.dispose();
+    }
+    wordRecognizers = {};
   }
 
   ///
@@ -172,6 +189,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     // (1) build word lists for fragment
     _initializeFragmentEndWordIndex(); // TODO need to push these during the algorithm
     _initializeWordsMerged();
+    _disposeRecognizers();
 
     // (2) run the algorithm with style per word
     // !!! just build the gesture recognizers on the fly here
@@ -251,9 +269,12 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
       // we never use another word in this iteration
       final word = wordsMerged[wordIndex];
       final wordWidth = getTextWidth(word, currentStyle, widget.textDirection, widget.textScaleFactor);
+      final wordTapRecognizer = _registerRecognizer(wordIndex, currentFragmentIndex);
       final wordSpan = TextSpan(
         text: word,
         style: currentStyle,
+        recognizer: wordTapRecognizer,
+        mouseCursor: wordTapRecognizer == null ? null : SystemMouseCursors.click,
       );
       //_print("word: $word ($wordWidth)");
 
@@ -393,6 +414,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
             TextSpan(
               text: wordPartBefore,
               style: currentStyle,
+              recognizer: wordSpan.recognizer,
+              mouseCursor: wordSpan.mouseCursor,
             ),
           );
           //_print("Added part before hyphen to texts: $wordPartBefore");
