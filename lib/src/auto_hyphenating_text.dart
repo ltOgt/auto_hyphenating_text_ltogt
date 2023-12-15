@@ -126,8 +126,8 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
   late List<int> fragmentEnds;
   void _initializeFragmentEndWordIndex() {
     fragmentEnds = [];
-    for (final list in fragmentWords) {
-      fragmentEnds.add(list.length + (fragmentEnds.lastOrNull ?? 0));
+    for (final wordsInFragment in fragmentWords) {
+      fragmentEnds.add(wordsInFragment.length + (fragmentEnds.lastOrNull ?? -1));
     }
     _print("initialized fragmentEnds: $fragmentEnds");
   }
@@ -405,6 +405,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
           for (int i = currentFragmentIndex; i < fragmentWords.length; i++) {
             fragmentEnds[i] += 1;
           }
+          currentEnd += 1;
           _print("Adjusted fragmentEnds: $fragmentEnds");
 
           currentLineSpaceUsed = 0;
