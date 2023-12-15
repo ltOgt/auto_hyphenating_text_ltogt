@@ -38,9 +38,17 @@ class _GermanExampleState extends State<GermanExample> {
     initOperation = initHyphenation(DefaultResourceLoaderLanguage.de1996);
   }
 
+  bool textToggle = true;
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: FloatingActionButton(
+        onPressed: () => setState(() {
+          textToggle = !textToggle;
+        }),
+        child: const Icon(Icons.add),
+      ),
       appBar: AppBar(
         title: Text(widget.title),
       ),
@@ -50,25 +58,45 @@ class _GermanExampleState extends State<GermanExample> {
           if (snapshot.connectionState == ConnectionState.done) {
             return Center(
               child: AutoHyphenatingText(
-                [
-                  (
-                    text: 'automatische Silbentrennung',
-                    style: const TextStyle(color: Colors.black),
-                    onTap: null,
-                  ),
-                  (
-                    text: 'automatische Silbentrennung',
-                    style: const TextStyle(color: Colors.blue),
-                    onTap: () {
-                      print("Moin");
-                    },
-                  ),
-                  (
-                    text: 'automatische Silbentrennung',
-                    style: const TextStyle(color: Colors.black),
-                    onTap: null,
-                  ),
-                ],
+                textToggle
+                    ? [
+                        (
+                          text: 'automatische Silbentrennung',
+                          style: const TextStyle(color: Colors.black),
+                          onTap: null,
+                        ),
+                        (
+                          text: 'automatische Silbentrennung',
+                          style: const TextStyle(color: Colors.blue),
+                          onTap: () {
+                            print("Moin");
+                          },
+                        ),
+                        (
+                          text: 'automatische Silbentrennung',
+                          style: const TextStyle(color: Colors.black),
+                          onTap: null,
+                        ),
+                      ]
+                    : [
+                        (
+                          text: 'vollautomatische Silbentrennung mit Automatischer Trennung',
+                          style: const TextStyle(color: Colors.black),
+                          onTap: null,
+                        ),
+                        (
+                          text: 'automatische Silbentrennung',
+                          style: const TextStyle(color: Colors.blue),
+                          onTap: () {
+                            print("Moin");
+                          },
+                        ),
+                        (
+                          text: 'automatische Silbentrennung',
+                          style: const TextStyle(color: Colors.black),
+                          onTap: null,
+                        ),
+                      ],
               ),
             );
           } else {

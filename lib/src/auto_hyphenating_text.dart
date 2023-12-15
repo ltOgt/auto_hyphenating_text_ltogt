@@ -73,11 +73,21 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
     super.initState();
     //_print("initState");
 
-    /// Not changed during hypenation
-    // TODO didUpdate
     _initHyphenator();
     _initializeFragmentWords();
     _initializeFragmentStyles();
+  }
+
+  @override
+  void didUpdateWidget(covariant AutoHyphenatingText oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.textFragments != oldWidget.textFragments) {
+      _disposeRecognizers();
+      _initializeFragmentWords();
+      _initializeFragmentStyles();
+      previousMaxWidth = 0;
+      previousTextSpans = [];
+    }
   }
 
   @override
@@ -285,7 +295,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
 
       final bool fitsOnLine = currentLineSpaceUsed + wordWidth < maxWidth - endBuffer;
 
-      // ....................................................................... WORD FITS IN LINE, go to end-of-word
+      // ....................................................................... WORD FITS IN LINE
       // NOTE: we continue or break in every case in this branch
       if (fitsOnLine) {
         //_print("fits on line");
@@ -329,7 +339,7 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
         //_print("Next word not anticipated");
         continue;
       }
-      // ....................................................................... WORD DOES NOT FIT IN LINE, TODO ? split if possible
+      // ....................................................................... WORD DOES NOT FIT IN LINE
       // NOTE: we continue or break in every case in this branch
       else {
         //_print("does not fit on line");
@@ -401,9 +411,6 @@ class _AutoHyphenatingTextState extends State<AutoHyphenatingText> {
         } else {
           /// The word does not fit onto the line, and WE CAN HYPHONATE
           //_print("hyphenate");
-
-          // TODO !!!!!!!!!!!!!!!!!!!!! need to mainly make adjustments here
-          //  we insert into wordsMerged here
 
           final wordPartBefore = mergeSyllablesFront(
             syllables,
